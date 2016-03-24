@@ -2,22 +2,22 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
  * See the GNU General Public License for more details.
- *  
+ *
  * You should have received a copy of the GNU General Public License along
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
  // Author: Matthew Dixon, Diego Klabjan, Jin Hoon Bang
  // Description: This file defines the class that implements the back-propagation algorithm. This algorithm uses mini-batch stochastic gradient descent to minimize a cross-entropy function.
- // Reference: Please cite as M. Dixon, D. Klabjan, and J. H. Bang. "Implementing Deep Neural Networks for Financial Market Prediction on the Intel Xeon Phi" at the Eighth Workshop on High Performance Computational Finance (WHPCF'15), held in conjunction with Supercomputing 2015, Austin, TX, November 2015. Available at SSRN: http://ssrn.com/abstract=2627258 or http://dx.doi.org/10.2139/ssrn.2627258.  
+ // Reference: Please cite as M. Dixon, D. Klabjan, and J. H. Bang. "Implementing Deep Neural Networks for Financial Market Prediction on the Intel Xeon Phi" at the Eighth Workshop on High Performance Computational Finance (WHPCF'15), held in conjunction with Supercomputing 2015, Austin, TX, November 2015. Available at SSRN: http://ssrn.com/abstract=2627258 or http://dx.doi.org/10.2139/ssrn.2627258.
  // Dependencies: Intel MKL Random Number generator and Intel MKL BLAS
  // Revision: 1.0
- 
+
 #include "BackProp.h"
 #include "DTime.h"
 
@@ -29,17 +29,17 @@ CBackProp::CBackProp(int nl,int ni,int batch_size_,int nSymbols_,int *sz, double
 	//set no of layers and their sizes
 	numl=nl;
 	lsize=new int[numl];
+	lsize_sums = new int[numl];
 
+    sz_sum = 0;
 	for(int i=0;i<numl;i++){
 		lsize[i]=sz[i];
+		lsize_sums[i] = sz_sum * batch_size;
+		sz_sum += sz[i];
 	}
 
 	//allocate memory for output of each neuron
-	out = new double*[numl];
-
-	for(int i=0;i<numl;i++){
-		out[i]=new double[lsize[i]*batch_size];
-	}
+	out = new double[numl * batch_size * sz_sum];
 
 	//allocate memory for delta
 	delta = new double*[numl];
@@ -68,8 +68,8 @@ CBackProp::CBackProp(int nl,int ni,int batch_size_,int nSymbols_,int *sz, double
         vslNewStream(&stream, VSL_BRNG_SFMT19937, 777);
 	for(int i=1;i<numl;i++){
                 int total = (lsize[i-1]+1)*lsize[i];
-	        rnd_data = new double[total]; 
-                tstart = dtime();	
+	        rnd_data = new double[total];
+                tstart = dtime();
 		vdRngUniform(VSL_RNG_METHOD_UNIFORM_STD, stream, total, rnd_data, -1.0, 1.0);
                 tstop = dtime();
 	        std::cout<<"Layer "<<i<<" rng generation: "<< (tstop-tstart)<<"(s)"<<std::endl;
@@ -85,7 +85,7 @@ CBackProp::CBackProp(int nl,int ni,int batch_size_,int nSymbols_,int *sz, double
         vslDeleteStream(&stream);
         delete rnd_data;
 	//initialize previous weights to 0 for first iteration
-        tstart = dtime();	
+        tstart = dtime();
 	for(int i=1;i<numl;i++)
 		for(int j=0;j<lsize[i];j++)
                         #pragma omp parallel for
@@ -110,8 +110,6 @@ void CBackProp::filterWeights(int i, int j, int k){
 CBackProp::~CBackProp()
 {
 	//free out
-	for(int i=0;i<numl;i++)
-		delete[] out[i];
 	delete[] out;
 
 	//free delta
@@ -142,10 +140,10 @@ CBackProp::~CBackProp()
 double CBackProp::sigmoid(double in) const
 {
       // truncate to avoid floating point overflow
-      if (in < -30.0) 
+      if (in < -30.0)
 	 return(0.0);
       else if(in>30.0)
-	 return(1.0); 
+	 return(1.0);
       else
          return((double)(1.0/(1.0+exp(-in))));
 }
@@ -154,31 +152,31 @@ double CBackProp::sigmoid(double in) const
 double CBackProp::F1(const float *tgt, int length, char* avg_type) const
 {
      double F1;
-     double prec, recall; 
+     double prec, recall;
      int TP =0; int FN =0; int TN=0; int FP =0;
      for (int i=0;i<length;i++){
        int k=0;
        for (int j=0;j<nSymbols*3;j+=3){
 		int idx = i*lsize[numl-1] + j;
-		int val =(int) max(&out[numl-1][idx],3)-1;
+		int val =(int) max(&out[lsize_sums[numl-1] + idx],3)-1;
 		if (val==tgt[i*nSymbols + k]){
                    TP+=1; TN+=2;
 		}
 		else{
-		   FN+=1;FP+=1;TN+=1; 
+		   FN+=1;FP+=1;TN+=1;
 		}
 		k++;
 	}
      }
-     std::cout<<"TP="<<TP<<", FP="<<FP<<", FN="<<FN<<std::endl; 
+     std::cout<<"TP="<<TP<<", FP="<<FP<<", FN="<<FN<<std::endl;
      prec = (double)TP/(TP+FP); recall = (double)TP/(TP+FN);
-     std::cout<<"prec="<<prec<<", recall="<<recall<<std::endl; 
-     
+     std::cout<<"prec="<<prec<<", recall="<<recall<<std::endl;
+
      F1 =0.5*prec*recall/(prec+recall);
 
      return(F1);
 }
- 
+
 // Calculate error rate of confusion matrix
 double CBackProp::error_rate(const float *tgt, int length) const{
 
@@ -189,22 +187,22 @@ double CBackProp::error_rate(const float *tgt, int length) const{
        int k=0;
        for (int j=0;j<nSymbols*3;j+=3){
 		int idx = i*lsize[numl-1]+ j;
-		int val =(int) max(&out[numl-1][idx],3)-1;
+		int val =(int) max(&out[lsize_sums[numl-1] + idx],3)-1;
 		if (val==tgt[i*nSymbols + k])
-                    error+=1.0; 
+                    error+=1.0;
 		k++;
 	}
     }
     double error_rate = error/((double)(length*nSymbols));
     //#pragma omp barrier
-      
+
    return(error_rate);
 }
 //Find the maximum value in array ar
 double CBackProp::max(double* ar, int len, bool idx) const
 {
     int pos = 0;
-    double max = 0.0; 
+    double max = 0.0;
     for (int i=0;i<len;i++){
       if (ar[i]>=max){
 	max = ar[i];
@@ -221,7 +219,7 @@ double CBackProp::max(double* ar, int len, bool idx) const
 double CBackProp::min(double* ar, int len, bool idx) const
 {
     int pos = 0;
-    double min = 9999999.9; 
+    double min = 9999999.9;
     for (int i=0;i<len;i++){
       if (ar[i]<=min){
 	min = ar[i];
@@ -257,19 +255,21 @@ double CBackProp::mse(float *tgt) const
         for(int i=0;i<batch_size;i++)
 	   for(int j=0;j<lsize[numl-1];j++){
 		int idx = i*lsize[numl-1] + j;
-		mse+=(tgt[idx]-out[numl-1][idx])*(tgt[idx]-out[numl-1][idx]);
+
+		int out_idx = lsize_sums[numl - 1] + idx;
+		mse+=(tgt[idx]-out[out_idx])*(tgt[idx]-out[out_idx]);
 	}
 	return mse/(2.0*batch_size);
 }
 
-//Compute the cross-entropy measure (for use with the softmax function in the final layer) 
+//Compute the cross-entropy measure (for use with the softmax function in the final layer)
 double CBackProp::cross_entropy(float *tgt, int test_size) const
 {
 	double entropy=0.0;
         for(int i=0;i<test_size;i++)
 	   for(int j=0;j<lsize[numl-1];j++){
 		int idx = i*lsize[numl-1] + j;
-		entropy-=tgt[idx]*log(out[numl-1][idx]);
+		entropy-=tgt[idx]*log(out[lsize_sums[numl - 1] + idx]);
 	}
 	return entropy;
 }
@@ -277,16 +277,13 @@ double CBackProp::cross_entropy(float *tgt, int test_size) const
 //returns i'th output of the net
 double CBackProp::Out(int i) const
 {
-	return out[numl-1][i];
+	return out[lsize_sums[numl - 1] + i];
 }
 // resizes out (there is probably a more efficienct technique than this)
 void CBackProp::change_depth(int depth){
-	batch_size = depth;
-        for(int i=0;i<numl;i++){
-             if (out[i] != NULL)
-              delete[] out[i];
-             out[i]=new double[lsize[i]*batch_size];
-        }
+    delete[] out;
+    batch_size = depth;
+    out = new double[numl * sz_sum * depth];
 }
 
 // feed forward one set of input
@@ -294,43 +291,43 @@ void CBackProp::ffwd(float *in, bool test)
 {
 	std::cout<<"In ffwd function"<<std::endl;
 	//assign content to input layer
-	
-        #pragma omp parallel for 
+
+        #pragma omp parallel for //PROBLEM HERE
         for(int i=0;i<batch_size;i++)
 	  for(int j=0;j<lsize[0];j++){
 		if (std::isnan(in[i*lsize[0]+j]) || std::isinf(in[i*lsize[0]+j])){
 	           std::cout<<"in["<<i*lsize[0]+j<<"]: "<<in[i*lsize[0]+j]<<std::endl;
 		   in[i*lsize[0]+j]=0.0;
 	       }
-               out[0][i*lsize[0]+j]=in[i*lsize[0]+j];  // output_from_neuron(i,j) J^th neuron in I^th Layer
+               out[i*lsize[0]+j]=in[i*lsize[0]+j];  // output_from_neuron(i,j) J^th neuron in I^th Layer
 	  }
-        #pragma omp barrier 
-	//assign output(activation) value 
+        #pragma omp barrier
+	//assign output(activation) value
 	//to each neuron usng sigmoid func
         double alpha = 1.0, beta = 1.0; /* Scaling factors */
 
 	for(int i=1;i<numl;i++) {			// For each layer
-             MKL_INT m = batch_size; 
+             MKL_INT m = batch_size;
              MKL_INT n = lsize[i];
              MKL_INT k = lsize[i-1];
-	     MKL_INT one = 1; 
+	     MKL_INT one = 1;
 
              double* sum = new double[m*n];
-             #pragma omp parallel for 
+             #pragma omp parallel for
               for(int l=0;l<m;l++)
 	       for (int j=0;j<n;j++)
                  sum[l*n+j] = weight[i][n*k + j];
-             #pragma omp barrier 
-	//	assign output(activation) value 
-             cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, k, alpha, out[i-1], k, weight[i], n, beta, sum, n);
+             #pragma omp barrier
+	//	assign output(activation) value
+             cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, k, alpha, &out[lsize_sums[i-1]], k, weight[i], n, beta, sum, n);
 	     int u =0;
-             
-             #pragma omp parallel for 
+
+             #pragma omp parallel for
              for (int l=0;l<m;l++){
 	        double factor = 0.0;
                 for (int j=0;j<n;j++){
    	         if (i == (numl-1) && ( j%3==0 )){
-	                factor = 0.0; 
+	                factor = 0.0;
 			double* val = new double[3];
 		        for (int k=0;k<3;k++){
 			    val[k]=exp(sum[l*n+j+k]);
@@ -342,13 +339,13 @@ void CBackProp::ffwd(float *in, bool test)
     		        double sum_check=0.0;
 			//check that the probability weights sum to one (up to a tolerance)
 		        for (int k=0;k<3;k++){
-		          out[i][l*n+j+k]=val[k]/factor;	
-			  sum_check+= out[i][l*n+j+k];
+		          out[lsize_sums[i] + l * n + j + k]=val[k]/factor;
+			  sum_check += out[lsize_sums[i] + l * n + j + k];
 			}
 			double eps =1.0e-3;
 			if (sum_check>(1.0 +eps) || sum_check<(1.0-eps)){
 		         for (int k=0;k<3;k++)
-			  std::cout<<"out["<<k<<"]:"<<out[i][l*n+j+k]<<std::endl;
+			  std::cout<<"out["<<k<<"]:"<<out[lsize_sums[i] + l * n + j + k]<<std::endl;
 			  std::cout<<"sum_check="<<sum_check<<std::endl;
 		        }
 			delete [] val;
@@ -359,14 +356,14 @@ void CBackProp::ffwd(float *in, bool test)
 		        double val=sigmoid(sum[l*n+j]);
 		        if (std::isnan(val) || std::isinf(val))
 		            val=fixNaN(sum[l*n+j],0.0, 1.0);
-			out[i][l*n+j]= val;
+			out[lsize_sums[i] + l * n + j]= val;
 		 } // else if
 	     } //end j
 	   } //end l
            #pragma omp barrier
 
 	  delete [] sum;
-	
+
 	  } // end i
 }
 double CBackProp::fixNaN(double sum, double min_, double max_) const {
@@ -397,20 +394,20 @@ void CBackProp::bpgt(float* x,float *tgt)
   	tstart = dtime();
 	//find delta for output layer
         int m = lsize[numl-1];
-        #pragma omp parallel for 
-        for(int i=0;i<batch_size; i++){	
+        #pragma omp parallel for
+        for(int i=0;i<batch_size; i++){
 	   for(int j=0;j<lsize[numl-1];j++){
-                delta[numl-1][i*m+j]=out[numl-1][i*m+j]*
-                (1-out[numl-1][i*m+j])*(tgt[i*m+j]-out[numl-1][i*m+j]); 
+                delta[numl-1][i*m+j]=out[lsize_sums[numl - 1] + i * m + j]*
+                (1-out[lsize_sums[numl - 1] + i * m + j])*(tgt[i*m+j]-out[lsize_sums[numl - 1] + i * m + j]);
 	   }
 	}
         #pragma omp barrier
         tstop = dtime();
         std::cout<<"delta for output later "<<(tstop-tstart)<<"(s)"<<std::endl;
-	//find delta for hidden layers	
+	//find delta for hidden layers
   	tstart = dtime();
 	for(int i=numl-2;i>0;i--){
-         #pragma omp parallel for 
+         #pragma omp parallel for
          for(int l=0;l<batch_size;l++){
 	    for(int j=0;j<lsize[i];j++){
 		double sum=0.0;
@@ -419,7 +416,7 @@ void CBackProp::bpgt(float* x,float *tgt)
 		    sum+=delta[i+1][kidx]*weight[i+1][j*lsize[i+1]+k];
 		}
 		int jidx = l*lsize[i] + j;
-		delta[i][jidx]=out[i][jidx]*(1-out[i][jidx])*sum;
+		delta[i][jidx]=out[lsize_sums[i] + jidx]*(1-out[lsize_sums[i] + jidx])*sum;
 	    }
 	 //output diagnostics for debugging code
          /*#ifdef _DEBUG_
@@ -435,37 +432,46 @@ void CBackProp::bpgt(float* x,float *tgt)
 	 #endif*/
 	 }
 	#pragma omp barrier
-        } //end i	
+        } //end i
 
         tstop = dtime();
         ttime += tstop - tstart;
         std::cout<<">delta propagation:"<<(tstop-tstart)<<"(s)"<<std::endl;
 
 
-        double alpha_ = beta, beta_ = 1.0; // Scaling factors 
-        char transa = 'T', transb = 'N'; // Transposition options 
 
-        stime = 0.0; 
+        double alpha_ = beta, beta_ = 1.0; // Scaling factors
+        char transa = 'T', transb = 'N'; // Transposition options
+
+        stime = 0.0;
+
         for(int i=1;i<numl;i++){
-	  MKL_INT m = lsize[i-1] +1; 
+	  MKL_INT m = lsize[i-1] +1;
 	  MKL_INT n = lsize[i];
 	  MKL_INT k = batch_size;
           tstart = dtime();
+
+/*-------------------------------------------------------------------------------------*/
           for (int st=0;st<10;st++){
-             dgemm(&transa, &transb, &m, &n, &k, &alpha_, out[i-1], &k, delta[i], &k, &beta_, weight[i], &m);
+             dgemm(&transa, &transb, &m, &n, &k, &alpha_, &out[lsize_sums[i-1]], &k, delta[i], &k, &beta_, weight[i], &m);
           }
+
           tstop = dtime();
           for (int u=0; u<(lsize[i]*(lsize[i-1]+1));u++){
-             if (weight[i][u]<-100.0) 
+             if (weight[i][u]<-100.0)
 		weight[i][u]=-100.0;
              else if( weight[i][u] > 100.0)
 		weight[i][u]=100.0;
 	  }
-        //Measure performance of DGEMM        
+
+        //Measure performance of DGEMM
         stime += (tstop - tstart)/10.0;
         ttime += (tstop - tstart)/10.0;
         //#ifdef _DIAGNOSTICS_
         double gflops = 10.0*(2.0e-9*m*n*k)/(tstop-tstart);
+
+/*-----------------------------------------------------------------------------------------*/
+
         std::cout<<">dgemm for weights update in layer("<<i<<"): "<<(tstop-tstart)/10.0<<"(s)"<<std::endl;
 	std::cout<<"GFlops/s: "<<gflops<<std::endl;
 	//#endif

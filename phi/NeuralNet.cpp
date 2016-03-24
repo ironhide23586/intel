@@ -128,7 +128,8 @@ int main(int argc, char* argv[])
          srand((unsigned) time(0));
          std::cout<<"Constructing network: " <<std::endl;
          tstart = dtime();
-	 CBackProp *bp = new CBackProp(numLayers, nInputs, batch_size, nSymbols, lSz,beta);
+	 //CBackProp *bp = new CBackProp(numLayers, nInputs, batch_size, nSymbols, lSz,beta);
+	 CBackProp bp(numLayers, nInputs, batch_size, nSymbols, lSz, beta);
          tstop = dtime();
          std::cout<<"time to construct CBackProp: " << (tstop-tstart) << "(s)"<<std::endl;
          for (int e=0;e<num_epochs;e++)
@@ -159,7 +160,8 @@ int main(int argc, char* argv[])
                 //        std::cout<<"Back propagation for mini-batch iteration: "<<i<<std::endl;
 		tstart = dtime();
                 for (int si=0;si<10;si++){
-		 bp->bpgt(x, t);
+		 //bp->bpgt(x, t);
+		 bp.bpgt(x, t);
 	        }
  		tstop = dtime();
                 ttime += tstop - tstart;
@@ -170,8 +172,10 @@ int main(int argc, char* argv[])
 		 if ( i%atoi(test) == 0 ){
                   std::cout<<"> Test: Feed forward network construction..."<<std::endl;
 		  tstart = dtime();
-		  bp->change_depth(test_size);
-		  bp->ffwd(x_hat,true);
+		  //bp->change_depth(test_size);
+		  //bp->ffwd(x_hat,true);
+		  bp.change_depth(test_size);
+		  bp.ffwd(x_hat,true);
 		  writeResults(r_hat, t_hat, test_size, nSymbols);
  		  tstop = dtime();
                   ttime += tstop - tstart;
@@ -179,13 +183,17 @@ int main(int argc, char* argv[])
 
 
                   //std::cout<<"Calculating error rate: "<<i<<std::endl;
-		  double error = bp->F1(t_hat,test_size,"micro");
+		  //double error = bp->F1(t_hat,test_size,"micro");
+		  double error = bp.F1(t_hat,test_size,"micro");
 		  std::cout<<"F1 error ["<<i<<"]:"<<error<<std::endl;
-		  error = bp->error_rate(t_hat,test_size);
+		  //error = bp->error_rate(t_hat,test_size);
+		  error = bp.error_rate(t_hat,test_size);
 		  std::cout<<"Classification error ["<<i<<"]:"<<error<<std::endl;
-		  error = bp->cross_entropy(t_hat, test_size);
+		  //error = bp->cross_entropy(t_hat, test_size);
+		  error = bp.cross_entropy(t_hat, test_size);
 		  std::cout<<"Cross entropy error ["<<i<<"]:"<<error<<std::endl;
-		  bp->change_depth(batch_size);
+		  //bp->change_depth(batch_size);
+		  bp.change_depth(batch_size);
 		 }
 		}
 
