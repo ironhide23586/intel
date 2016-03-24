@@ -46,7 +46,4 @@ Occasionally the CPU and Phi version of the code will exit with a segmentation
 fault. The exact cause of this is correctly unknown. It is recommended that
 the code be simply rerun if this occurs.
 
-
-
-
-
+UPDATE: This has been fixed on 3/23/2016
