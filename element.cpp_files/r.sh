@@ -1,15 +1,27 @@
 export LD_LIBRARY_PATH=/root/sbiswas
 export KMP_AFFINITY=compact
+export turbo=enabled
 
-for mat_size in {1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000}; do
-	for cores in {1, 2, 4, 8, 16, 32, 60}; do
-		for threads in {1, 2, 3, 4}; do
-			export KMP_PLACE_THREADS=$cores'c,'$threads't'
-			echo 'Matrix Size = '$mat_size >> report.txt
-			echo 'Experiment with '$threads' threads/core on '$cores' cores' >> report.txt
-			./e_inplace $mat_size >> report.txt
+for ((mat_size=1000; mat_size<=50000; mat_size+=1000)); do
+	for ((cores=1; cores<=60; cores*=2)); do
+		for ((threads=1; threads<=4; threads++)); do
+			
+			conf=$cores'c,'$threads't';
+			export KMP_PLACE_THREADS=$conf
+			echo 'Experiment with matrix size='$mat_size' using '$cores' cores with '$threads' threads per core'
+			echo 'Matrix Size = '$mat_size >> report2.txt
+			echo 'Experiment with '$threads' threads/core on '$cores' cores' >> report2.txt
+			./e_inplace.mic $mat_size >> report2.txt
+			
+
+
 		done
+
+		if [ $cores -eq 32 ]
+                then
+                	cores=30
+		fi
+
 	done
 done
-		
-		
+
